@@ -1814,8 +1814,8 @@ packages:
   requires_python: '>=3.8'
 - pypi: ./
   name: relbench
-  version: 1.1.0.dev20250721
-  sha256: 6f569f628e59012ae146147cf4f7dd7f8c25bf2c00f0db664c825315c2e0924c
+  version: 1.1.0.dev20251121
+  sha256: 16d703dc4f8101bbda9631fe13d148b2ce44652c3fb484fd7c5206f5ee827b0d
   requires_dist:
   - pandas
   - pooch
