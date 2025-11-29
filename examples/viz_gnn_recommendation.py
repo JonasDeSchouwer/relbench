@@ -53,55 +53,65 @@ def extract_nodes_and_edges(
     
     # Extract all nodes and identify input nodes
     for node_type in batch.node_types:
-        if hasattr(batch[node_type], 'n_id'):
-            n_id = batch[node_type].n_id
-            for local_idx, global_idx in enumerate(n_id.tolist()):
-                all_nodes.add((node_type, int(global_idx)))
+        node_data = batch[node_type]
+        if hasattr(node_data, 'n_id'):
+            n_id = node_data.n_id
+            if n_id is not None:
+                for global_idx in n_id.tolist():
+                    all_nodes.add((node_type, int(global_idx)))
         
         # Identify source nodes (input nodes in source batch)
-        if node_type == source_node_type and hasattr(batch[node_type], 'input_id'):
-            if hasattr(batch[node_type], 'n_id'):
-                n_id = batch[node_type].n_id
-                # input_id contains the global node indices that were used as input
-                # We need to find which local positions correspond to these
-                input_id = batch[node_type].input_id
-                for input_global_idx in input_id.tolist():
-                    # Find local position where n_id matches input_global_idx
-                    local_positions = (n_id == input_global_idx).nonzero(as_tuple=True)[0]
-                    for pos in local_positions:
-                        source_nodes.add((node_type, int(n_id[pos])))
+        if node_type == source_node_type and hasattr(node_data, 'input_id'):
+            if hasattr(node_data, 'n_id') and node_data.n_id is not None:
+                n_id = node_data.n_id
+                input_id = node_data.input_id
+                if input_id is not None:
+                    # input_id contains the global node indices that were used as input
+                    # We need to find which local positions correspond to these
+                    for input_global_idx in input_id.tolist():
+                        # Find local position where n_id matches input_global_idx
+                        local_positions = (n_id == input_global_idx).nonzero(as_tuple=True)[0]
+                        for pos in local_positions:
+                            source_nodes.add((node_type, int(n_id[pos])))
         
         # Identify destination nodes (input nodes in destination batch)
-        if node_type == dst_node_type and hasattr(batch[node_type], 'input_id'):
-            if hasattr(batch[node_type], 'n_id'):
-                n_id = batch[node_type].n_id
-                input_id = batch[node_type].input_id
-                for input_global_idx in input_id.tolist():
-                    local_positions = (n_id == input_global_idx).nonzero(as_tuple=True)[0]
-                    for pos in local_positions:
-                        dst_nodes.add((node_type, int(n_id[pos])))
+        if node_type == dst_node_type and hasattr(node_data, 'input_id'):
+            if hasattr(node_data, 'n_id') and node_data.n_id is not None:
+                n_id = node_data.n_id
+                input_id = node_data.input_id
+                if input_id is not None:
+                    for input_global_idx in input_id.tolist():
+                        local_positions = (n_id == input_global_idx).nonzero(as_tuple=True)[0]
+                        for pos in local_positions:
+                            dst_nodes.add((node_type, int(n_id[pos])))
     
     # Extract all edges
     for edge_type in batch.edge_types:
         src_type, edge_name, dst_type = edge_type
-        if hasattr(batch[edge_type], 'edge_index'):
-            edge_index = batch[edge_type].edge_index
-            if edge_index.size(1) > 0:
+        edge_data = batch[edge_type]
+        if hasattr(edge_data, 'edge_index'):
+            edge_index = edge_data.edge_index
+            if edge_index is not None and edge_index.size(1) > 0:
                 # Map local indices to global n_id
-                src_n_id = batch[src_type].n_id
-                dst_n_id = batch[dst_type].n_id
-                
-                for i in range(edge_index.size(1)):
-                    src_local_idx = int(edge_index[0, i])
-                    dst_local_idx = int(edge_index[1, i])
-                    src_global_idx = int(src_n_id[src_local_idx])
-                    dst_global_idx = int(dst_n_id[dst_local_idx])
+                src_node_data = batch[src_type]
+                dst_node_data = batch[dst_type]
+                if (hasattr(src_node_data, 'n_id') and src_node_data.n_id is not None and
+                    hasattr(dst_node_data, 'n_id') and dst_node_data.n_id is not None):
+                    src_n_id = src_node_data.n_id
+                    dst_n_id = dst_node_data.n_id
                     
-                    edges.append((
-                        (src_type, src_global_idx),
-                        (dst_type, dst_global_idx),
-                        edge_name
-                    ))
+                    for i in range(edge_index.size(1)):
+                        src_local_idx = int(edge_index[0, i])
+                        dst_local_idx = int(edge_index[1, i])
+                        if src_local_idx < len(src_n_id) and dst_local_idx < len(dst_n_id):
+                            src_global_idx = int(src_n_id[src_local_idx])
+                            dst_global_idx = int(dst_n_id[dst_local_idx])
+                            
+                            edges.append((
+                                (src_type, src_global_idx),
+                                (dst_type, dst_global_idx),
+                                edge_name
+                            ))
     
     return all_nodes, edges, source_nodes, dst_nodes
 
@@ -397,12 +407,25 @@ def main():
     output_dir.mkdir(exist_ok=True)
     
     # Visualize batches
+    print(f"Train loader has {len(train_loader)} batches")
+    # Use iteration instead of indexing for LinkNeighborLoader
+    batch_iter = iter(train_loader)
     for i in range(min(args.num_samples, len(train_loader))):
-        batch_idx = args.batch_idx + i
-        if batch_idx >= len(train_loader):
-            break
+        if i < args.batch_idx:
+            # Skip batches until we reach the desired starting index
+            try:
+                next(batch_iter)
+            except StopIteration:
+                break
+            continue
         
-        src_batch, pos_dst_batch, neg_dst_batch = train_loader[batch_idx]
+        print(f"Loading batch {i}...")
+        try:
+            src_batch, pos_dst_batch, neg_dst_batch = next(batch_iter)
+            print(f"Batch {i} loaded successfully")
+        except StopIteration:
+            print(f"No more batches available")
+            break
         
         # Extract source and destination nodes from all batches
         _, _, source_nodes, _ = extract_nodes_and_edges(
