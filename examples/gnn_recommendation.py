@@ -219,9 +219,9 @@ def test(src_loader: NeighborLoader, dst_loader: NeighborLoader) -> np.ndarray:
     for batch in tqdm(src_loader):
         batch = batch.to(device)
         emb = model(batch, task.src_entity_table)
-        _, pred_index_mat = torch.topk(emb @ dst_emb.t(), k=task.eval_k, dim=1)
+        _, pred_index_mat = torch.topk(emb @ dst_emb.t(), k=task.eval_k, dim=1) # (batch_size, eval_k)
         pred_index_mat_list.append(pred_index_mat.cpu())
-    pred = torch.cat(pred_index_mat_list, dim=0).numpy()
+    pred = torch.cat(pred_index_mat_list, dim=0).numpy() # (num_src_nodes, eval_k)
     return pred
 
 
