@@ -4,9 +4,10 @@ import json
 import os
 import warnings
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 import torch
 import torch.nn.functional as F
 from model import Model
@@ -18,7 +19,7 @@ from torch_geometric.loader import NeighborLoader
 from torch_geometric.seed import seed_everything
 from tqdm import tqdm
 
-from relbench.base import Dataset, RecommendationTask, TaskType
+from relbench.base import Dataset, RecommendationTask, Table, TaskType
 from relbench.datasets import get_dataset
 from relbench.modeling.graph import get_link_train_table_input, make_pkey_fkey_graph
 from relbench.modeling.loader import LinkNeighborLoader
@@ -62,7 +63,6 @@ seed_everything(args.seed)
 
 dataset: Dataset = get_dataset(args.dataset, download=True)
 task: RecommendationTask = get_task(args.dataset, args.task, download=True)
-tune_metric = "link_prediction_map"
 assert task.task_type == TaskType.LINK_PREDICTION
 
 stypes_cache_path = Path(f"{args.cache_dir}/{args.dataset}/stypes.json")
@@ -219,19 +219,66 @@ def test(src_loader: NeighborLoader, dst_loader: NeighborLoader) -> np.ndarray:
     for batch in tqdm(src_loader):
         batch = batch.to(device)
         emb = model(batch, task.src_entity_table)
-        _, pred_index_mat = torch.topk(emb @ dst_emb.t(), k=task.eval_k, dim=1) # (batch_size, eval_k)
+
+        # sorted indices of the dst predictions, descending order
+        pred_index_mat = torch.argsort(emb @ dst_emb.t(), dim=1, descending=True) # (batch_size, num_dst_nodes)
         pred_index_mat_list.append(pred_index_mat.cpu())
-    pred = torch.cat(pred_index_mat_list, dim=0).numpy() # (num_src_nodes, eval_k)
+    pred = torch.cat(pred_index_mat_list, dim=0).numpy() # (num_src_nodes, num_dst_nodes)
     return pred
+
+
+
+
+def evaluate_auc(
+        pred: NDArray,
+        target_table: Table,
+        dst_entity_col: str,
+    ) -> Dict[str, float]:
+        metrics = [auc]
+
+        pred_isin_list = []
+        dst_count_list = []
+        for true_dst_nodes, pred_dst_nodes in zip(
+            target_table.df[dst_entity_col],
+            pred,
+        ):
+            pred_isin_list.append(
+                np.isin(np.array(pred_dst_nodes), np.array(true_dst_nodes))
+            )
+            dst_count_list.append(len(true_dst_nodes))
+        pred_isin = np.stack(pred_isin_list)
+        dst_count = np.array(dst_count_list)
+
+        return {fn.__name__: fn(pred_isin, dst_count) for fn in metrics}
+
+
+def auc(pred_isin: NDArray, dst_count: NDArray):
+    """
+    Args:
+        pred_isin: (num_src_nodes, num_dst_nodes). dim -1 is ordered by descending score. We want to know the AUC score of the prediction.
+        dst_count: (num_src_nodes,)
+
+    Gets the AUC score of the prediction.
+    """
+    num_dst_nodes = pred_isin.shape[-1]
+    # cum[i] is the number of 1s in [0, ..., i]
+    cum = np.cumsum(pred_isin, axis=-1) # (num_src_nodes, num_dst_nodes)
+
+    # remove the cases where dst_count is 0 or num_dst_nodes
+    valid_mask = (dst_count > 0) & (dst_count < num_dst_nodes)
+    auc = (1 / (dst_count * (num_dst_nodes - dst_count))[valid_mask]) * (cum * (pred_isin == 0)).sum(axis=-1)[valid_mask]
+
+    return auc.mean()
 
 
 state_dict = None
 best_val_metric = 0
+tune_metric = "auc"
 for epoch in range(1, args.epochs + 1):
     train_loss = train()
     if epoch % args.eval_epochs_interval == 0:
         val_pred = test(*eval_loaders_dict["val"])
-        val_metrics = task.evaluate(val_pred, task.get_table("val"))
+        val_metrics = evaluate_auc(val_pred, task.get_table("val"), task.dst_entity_col)
         print(
             f"Epoch: {epoch:02d}, Train loss: {train_loss}, "
             f"Val metrics: {val_metrics}"
@@ -244,9 +291,13 @@ for epoch in range(1, args.epochs + 1):
 
 model.load_state_dict(state_dict)
 val_pred = test(*eval_loaders_dict["val"])
-val_metrics = task.evaluate(val_pred, task.get_table("val"))
-print(f"Best Val metrics: {val_metrics}")
+val_auc = evaluate_auc(val_pred, task.get_table("val"), task.dst_entity_col)
+print(f"Best Val auc: {val_auc}")
+val_map = task.evaluate(val_pred[:, :task.eval_k], task.get_table("val"))
+print(f"Best Val map: {val_map}")
 
 test_pred = test(*eval_loaders_dict["test"])
-test_metrics = task.evaluate(test_pred)
-print(f"Best test metrics: {test_metrics}")
+test_auc = evaluate_auc(test_pred, task.get_table("test"), task.dst_entity_col)
+print(f"Best test auc: {test_auc}")
+test_map = task.evaluate(test_pred[:, :task.eval_k], task.get_table("test"))
+print(f"Best test map: {test_map}")
