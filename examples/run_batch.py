@@ -32,35 +32,38 @@ jobs = [
 
 processes = []
 
-for idx, (dataset, task) in enumerate(jobs):
-    cuda_device = idx % 8  # cycle from 0 to 7
+try:
+    for idx, (dataset, task) in enumerate(jobs):
+        cuda_device = idx % 8  # cycle from 0 to 7
 
-    # Build output file path
-    out_file = OUTPUT_DIR / f"{dataset}_{task}.out"
+        # Build full command
+        cmd = BASE_CMD + [
+            "--dataset", dataset,
+            "--task", task,
+            "--epochs", "20",
+        ]
 
-    # Build full command
-    cmd = BASE_CMD + [
-        "--dataset", dataset,
-        "--task", task,
-        "--epochs", "20",
-    ]
+        # Environment: inherit and override CUDA_VISIBLE_DEVICES and RELBENCH_CACHE_DIR
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(cuda_device)
+        env["RELBENCH_CACHE_DIR"] = CACHE_DIR
 
-    # Environment: inherit and override CUDA_VISIBLE_DEVICES and RELBENCH_CACHE_DIR
-    env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(cuda_device)
-    env["RELBENCH_CACHE_DIR"] = CACHE_DIR
+        # Open output file and start process in "background" (non-blocking)
+        out_dir = OUTPUT_DIR / f"{dataset}_{task}"
+        out_file = out_dir / "stdout.out"
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        (out_dir / "figures").mkdir(parents=True, exist_ok=True)
+        f = open(out_file, "w")
+        p = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, env=env)
+        processes.append((p, f))
 
-    # Open output file and start process in "background" (non-blocking)
-    f = open(out_file, "w")
-    p = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, env=env)
-    processes.append((p, f))
+        print(f"Started job {idx}: dataset={dataset}, task={task}, "
+            f"CUDA_VISIBLE_DEVICES={cuda_device}, pid={p.pid}, output={out_file}")
 
-    print(f"Started job {idx}: dataset={dataset}, task={task}, "
-          f"CUDA_VISIBLE_DEVICES={cuda_device}, pid={p.pid}, output={out_file}")
+    # If you truly want the script to exit immediately and leave processes running,
+    # comment out the block below. As written, it waits for all jobs to finish.
 
-# If you truly want the script to exit immediately and leave processes running,
-# comment out the block below. As written, it waits for all jobs to finish.
-
-for p, f in processes:
-    p.wait()
-    f.close()
+finally:
+    for p, f in processes:
+        p.wait()
+        f.close()

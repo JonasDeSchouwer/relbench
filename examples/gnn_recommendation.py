@@ -5,6 +5,8 @@ import os
 import warnings
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
+import matplotlib.pyplot as plt
+from collections import namedtuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -204,7 +206,7 @@ def train() -> float:
 
 
 @torch.no_grad()
-def test(src_loader: NeighborLoader, dst_loader: NeighborLoader) -> np.ndarray:
+def test(src_loader: NeighborLoader, dst_loader: NeighborLoader) -> Tuple[np.ndarray, np.ndarray]:
     model.eval()
 
     dst_embs: list[Tensor] = []
@@ -216,26 +218,88 @@ def test(src_loader: NeighborLoader, dst_loader: NeighborLoader) -> np.ndarray:
     del dst_embs
 
     pred_index_mat_list: list[Tensor] = []
+    pred_scores_sorted_list: list[Tensor] = []
     for batch in tqdm(src_loader):
         batch = batch.to(device)
         emb = model(batch, task.src_entity_table)
 
         # sorted indices of the dst predictions, descending order
-        pred_index_mat = torch.argsort(emb @ dst_emb.t(), dim=1, descending=True) # (batch_size, num_dst_nodes)
+        pred_scores_sorted, pred_index_mat = torch.sort(emb @ dst_emb.t(), dim=1, descending=True) # (batch_size, num_dst_nodes)
         pred_index_mat_list.append(pred_index_mat.cpu())
+        pred_scores_sorted_list.append(pred_scores_sorted.cpu())
     pred = torch.cat(pred_index_mat_list, dim=0).numpy() # (num_src_nodes, num_dst_nodes)
-    return pred
+    pred_scores_sorted = torch.cat(pred_scores_sorted_list, dim=0).numpy() # (num_src_nodes, num_dst_nodes)
+    return pred, pred_scores_sorted
 
 
+def plot_logit_distribution(pos_logits: np.ndarray, neg_logits: np.ndarray) -> plt.Figure:
+    """
+    Args:
+        pos_logits: (num_pos_logits,)
+        neg_logits: (num_neg_logits,)
+    """
+    fig, ax1 = plt.subplots()
+    ax1.hist(pos_logits, bins=100, alpha=0.5, label="Positive", color="green")
+    ax1.set_ylabel("Positive count")
+
+    ax2 = ax1.twinx()
+    ax2.hist(neg_logits, bins=100, alpha=0.5, label="Negative", color="red")
+    ax2.set_ylabel("Negative count")
+
+    # Combined legend
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(handles1 + handles2, labels1 + labels2, loc="upper right")
+
+    return fig
 
 
-def evaluate_auc(
+def plot_rankings(pred_isin: np.ndarray, eval_k: int):
+    """
+    Create scatter plot showing points where pred_isin is True
+    Args: 
+        pred_isin: (num_src_nodes, num_dst_nodes) - bool
+    Returns:
+        namedtuple("RankingPlots", ["fig_scatter", "ax_scatter", "fig_zoomed", "ax_zoomed"])
+    """
+    rows, cols = np.where(pred_isin)
+    fig_scatter, ax_scatter = plt.subplots(figsize=(10, 8))
+    ax_scatter.scatter(cols, rows, s=1, alpha=0.5)
+    ax_scatter.set_xlim(-0.5, pred_isin.shape[-1] - 0.5)
+    ax_scatter.set_xlabel("rank")
+    ax_scatter.set_ylabel("src_idx")
+    ax_scatter.set_title(f"Scatter plot of True values in pred_isin ({len(rows)} points)")
+    ax_scatter.axvline(x=eval_k-0.5, color="red", linestyle="--", linewidth=1, label="rank=10")
+    ax_scatter.legend()
+    ax_scatter.invert_yaxis()  # Invert y-axis to match imshow orientation
+    plt.tight_layout()
+
+    # Create zoomed-in scatter plot focusing on first 100 ranks
+    MAX_RANK = 100
+    mask = cols < MAX_RANK
+    rows_zoomed = rows[mask]
+    cols_zoomed = cols[mask]
+
+    fig_zoomed, ax_zoomed = plt.subplots(figsize=(12, 8))
+    ax_zoomed.scatter(cols_zoomed, rows_zoomed, s=2, alpha=0.6)
+    ax_zoomed.set_xlabel("rank")
+    ax_zoomed.set_ylabel("src_idx")
+    ax_zoomed.set_title(f"Zoomed: True values in first {MAX_RANK} ranks ({len(rows_zoomed)} points)")
+    ax_zoomed.axvline(x=eval_k-0.5, color="red", linestyle="--", linewidth=1, label="rank=10")
+    ax_zoomed.set_xlim(-0.5, MAX_RANK - 0.5)
+    ax_zoomed.legend()
+    ax_zoomed.invert_yaxis()  # Invert y-axis to match imshow orientation
+    ax_zoomed.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    return namedtuple("RankingPlots", ["fig_scatter", "ax_scatter", "fig_zoomed", "ax_zoomed"])(fig_scatter, ax_scatter, fig_zoomed, ax_zoomed)
+
+
+def get_pred_isin_and_dst_count(
         pred: NDArray,
         target_table: Table,
         dst_entity_col: str,
     ) -> Dict[str, float]:
-        metrics = [auc]
-
         pred_isin_list = []
         dst_count_list = []
         for true_dst_nodes, pred_dst_nodes in zip(
@@ -249,7 +313,7 @@ def evaluate_auc(
         pred_isin = np.stack(pred_isin_list)
         dst_count = np.array(dst_count_list)
 
-        return {fn.__name__: fn(pred_isin, dst_count) for fn in metrics}
+        return pred_isin, dst_count
 
 
 def auc(pred_isin: NDArray, dst_count: NDArray):
@@ -277,8 +341,12 @@ tune_metric = "auc"
 for epoch in range(1, args.epochs + 1):
     train_loss = train()
     if epoch % args.eval_epochs_interval == 0:
-        val_pred = test(*eval_loaders_dict["val"])
-        val_metrics = evaluate_auc(val_pred, task.get_table("val"), task.dst_entity_col)
+        val_pred, val_pred_scores_sorted = test(*eval_loaders_dict["val"])
+        val_pred_isin, val_dst_count = get_pred_isin_and_dst_count(val_pred, task.get_table("val"), task.dst_entity_col)
+        val_auc = auc(val_pred_isin, val_dst_count)
+        val_metrics = {
+            "auc": val_auc,
+        }
         print(
             f"Epoch: {epoch:02d}, Train loss: {train_loss}, "
             f"Val metrics: {val_metrics}"
@@ -287,17 +355,65 @@ for epoch in range(1, args.epochs + 1):
         if val_metrics[tune_metric] >= best_val_metric:
             best_val_metric = val_metrics[tune_metric]
             state_dict = copy.deepcopy(model.state_dict())
+        
+        # plots
+        # ranking - first 2000
+        val_ranking_plots = plot_rankings(val_pred_isin[:2000], task.eval_k)
+        val_ranking_plots.fig_scatter.savefig(f"output/{args.dataset}_{args.task}/figures/2000_ranking_{epoch}.png")
+        val_ranking_plots.fig_zoomed.savefig(f"output/{args.dataset}_{args.task}/figures/2000_ranking_zoomed_{epoch}.png")
+        plt.close(val_ranking_plots.fig_scatter)
+        plt.close(val_ranking_plots.fig_zoomed)
+        print("Generated val ranking plot")
 
+        # logits distribution - first 5000
+        val_logit_distribution_plots = plot_logit_distribution(val_pred_scores_sorted[:5000][val_pred_isin[:5000]], val_pred_scores_sorted[:5000][~val_pred_isin[:5000]])
+        val_logit_distribution_plots.savefig(f"output/{args.dataset}_{args.task}/figures/5000_logit_distribution_{epoch}.png")
+        plt.close(val_logit_distribution_plots)
+        print("Generated val logit distribution plot")
 
 model.load_state_dict(state_dict)
-val_pred = test(*eval_loaders_dict["val"])
-val_auc = evaluate_auc(val_pred, task.get_table("val"), task.dst_entity_col)
-print(f"Best Val auc: {val_auc}")
+
+# val metrics
+val_pred, val_pred_scores_sorted = test(*eval_loaders_dict["val"])
+val_pred_isin, val_dst_count = get_pred_isin_and_dst_count(val_pred, task.get_table("val"), task.dst_entity_col)
+val_auc = auc(val_pred_isin, val_dst_count)
 val_map = task.evaluate(val_pred[:, :task.eval_k], task.get_table("val"))
+print(f"Best Val auc: {val_auc}")
 print(f"Best Val map: {val_map}")
 
-test_pred = test(*eval_loaders_dict["test"])
-test_auc = evaluate_auc(test_pred, task.get_table("test"), task.dst_entity_col)
-print(f"Best test auc: {test_auc}")
+# val plots
+# ranking - first 2000 sources
+val_ranking_plots = plot_rankings(val_pred_isin[:2000], task.eval_k)
+val_ranking_plots.fig_scatter.savefig(f"output/{args.dataset}_{args.task}/figures/2000_ranking_{epoch}.png")
+val_ranking_plots.fig_zoomed.savefig(f"output/{args.dataset}_{args.task}/figures/2000_ranking_zoomed_{epoch}.png")
+plt.close(val_ranking_plots.fig_scatter)
+plt.close(val_ranking_plots.fig_zoomed)
+# ranking - all
+val_ranking_plots = plot_rankings(val_pred_isin, task.eval_k)
+val_ranking_plots.fig_scatter.savefig(f"output/{args.dataset}_{args.task}/figures/ranking_{epoch}.png")
+val_ranking_plots.fig_zoomed.savefig(f"output/{args.dataset}_{args.task}/figures/ranking_zoomed_{epoch}.png")
+plt.close(val_ranking_plots.fig_scatter)
+plt.close(val_ranking_plots.fig_zoomed)
+# logits distribution - all
+val_logit_distribution_plots = plot_logit_distribution(val_pred_scores_sorted[val_pred_isin], val_pred_scores_sorted[~val_pred_isin])
+val_logit_distribution_plots.savefig(f"output/{args.dataset}_{args.task}/figures/logit_distribution_{epoch}.png")
+plt.close(val_logit_distribution_plots)
+
+
+# test metrics
+test_pred, test_pred_scores_sorted = test(*eval_loaders_dict["test"])
+test_pred_isin, test_dst_count = get_pred_isin_and_dst_count(test_pred, task.get_table("test"), task.dst_entity_col)
+test_auc = auc(test_pred_isin, test_dst_count)
 test_map = task.evaluate(test_pred[:, :task.eval_k], task.get_table("test"))
+print(f"Best test auc: {test_auc}")
 print(f"Best test map: {test_map}")
+
+# test plots
+test_ranking_plots = plot_rankings(test_pred_isin, task.eval_k)
+test_ranking_plots.fig_scatter.savefig(f"output/{args.dataset}_{args.task}/figures/ranking_{epoch}.png")
+test_ranking_plots.fig_zoomed.savefig(f"output/{args.dataset}_{args.task}/figures/ranking_zoomed_{epoch}.png")
+plt.close(test_ranking_plots.fig_scatter)
+plt.close(test_ranking_plots.fig_zoomed)
+test_logit_distribution_plots = plot_logit_distribution(test_pred_scores_sorted[test_pred_isin], test_pred_scores_sorted[~test_pred_isin])
+test_logit_distribution_plots.savefig(f"output/{args.dataset}_{args.task}/figures/logit_distribution_{epoch}.png")
+plt.close(test_logit_distribution_plots)
