@@ -205,6 +205,19 @@ def train() -> float:
     return loss_accum / count_accum if count_accum > 0 else float("nan")
 
 
+@torch.compile
+def get_scores_and_indices(emb: Tensor, dst_emb: Tensor) -> Tuple[Tensor, Tensor]:
+    """
+    Args:
+        emb: (batch_size, d)
+        dst_emb: (num_dst_nodes, d)
+    Returns:
+        scores: (batch_size, num_dst_nodes)
+        indices: (batch_size, num_dst_nodes)
+    """
+    return torch.sort(emb @ dst_emb.t(), dim=1, descending=True) # (batch_size, num_dst_nodes)
+
+
 @torch.no_grad()
 def test(src_loader: NeighborLoader, dst_loader: NeighborLoader) -> Tuple[np.ndarray, np.ndarray]:
     model.eval()
@@ -221,10 +234,10 @@ def test(src_loader: NeighborLoader, dst_loader: NeighborLoader) -> Tuple[np.nda
     pred_scores_sorted_list: list[Tensor] = []
     for batch in tqdm(src_loader):
         batch = batch.to(device)
-        emb = model(batch, task.src_entity_table)
+        emb = model(batch, task.src_entity_table) # (batch_size, d)
 
         # sorted indices of the dst predictions, descending order
-        pred_scores_sorted, pred_index_mat = torch.sort(emb @ dst_emb.t(), dim=1, descending=True) # (batch_size, num_dst_nodes)
+        pred_scores_sorted, pred_index_mat = get_scores_and_indices(emb, dst_emb) # (batch_size, num_dst_nodes)
         pred_index_mat_list.append(pred_index_mat.cpu())
         pred_scores_sorted_list.append(pred_scores_sorted.cpu())
     pred = torch.cat(pred_index_mat_list, dim=0).numpy() # (num_src_nodes, num_dst_nodes)
