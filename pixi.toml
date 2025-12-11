@@ -10,6 +10,7 @@ version = "0.1.0"
 [dependencies]
 uv = "*"
 python = "==3.10"
+ipykernel = ">=7.1.0,<8"
 
 [pypi-options]
 index-url = "https://pypi.org/simple"
@@ -18,3 +19,6 @@ find-links = [{ url = "https://data.pyg.org/whl/torch-2.7.0+cu126.html" }]
 [pypi-dependencies]
 pyg-lib = "*"
 relbench = { path = ".", editable = true, extras = ["full", "example", "dev", "test"] }
+
+[tool.pixi.activation.env]
+RELBENCH_CACHE_DIR = "$HOME/scratch/relbench"

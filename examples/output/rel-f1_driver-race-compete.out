@@ -1,0 +1,17 @@
+Downloading file 'rel-f1/tasks/driver-race-compete.zip' from 'https://relbench.stanford.edu/download/rel-f1/tasks/driver-race-compete.zip' to '/lfs/ampere2/0/jonasds/scratch/relbench'.
+Traceback (most recent call last):
+  File "/lfs/ampere2/0/jonasds/relbench/examples/gnn_recommendation.py", line 65, in <module>
+    task: RecommendationTask = get_task(args.dataset, args.task, download=True)
+  File "/lfs/ampere2/0/jonasds/relbench/relbench/tasks/__init__.py", line 107, in get_task
+    download_task(dataset_name, task_name)
+  File "/lfs/ampere2/0/jonasds/relbench/relbench/tasks/__init__.py", line 77, in download_task
+    DOWNLOAD_REGISTRY.fetch(
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/pooch/core.py", line 589, in fetch
+    stream_download(
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/pooch/core.py", line 807, in stream_download
+    downloader(url, tmp, pooch)
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/pooch/downloaders.py", line 221, in __call__
+    response.raise_for_status()
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: https://relbench.stanford.edu/download/rel-f1/tasks/driver-race-compete.zip
