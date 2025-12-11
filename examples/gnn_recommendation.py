@@ -302,10 +302,10 @@ def get_pred_isin_and_dst_count(
     ) -> Dict[str, float]:
         pred_isin_list = []
         dst_count_list = []
-        for true_dst_nodes, pred_dst_nodes in zip(
+        for true_dst_nodes, pred_dst_nodes in tqdm(zip(
             target_table.df[dst_entity_col],
             pred,
-        ):
+        ), total=len(pred)):
             pred_isin_list.append(
                 np.isin(np.array(pred_dst_nodes), np.array(true_dst_nodes))
             )
@@ -335,6 +335,37 @@ def auc(pred_isin: NDArray, dst_count: NDArray):
     return auc.mean()
 
 
+# eval at epoch 0:
+epoch = 0
+
+val_pred, val_pred_scores_sorted = test(*eval_loaders_dict["val"])
+val_pred_isin, val_dst_count = get_pred_isin_and_dst_count(val_pred, task.get_table("val"), task.dst_entity_col)
+val_auc = auc(val_pred_isin, val_dst_count)
+val_metrics = {
+    "auc": val_auc,
+}
+print(
+    f"Epoch: {epoch:02d} - Initial evaluation"
+    f"Val metrics: {val_metrics}"
+)
+# plots
+# ranking - first 2000
+val_ranking_plots = plot_rankings(val_pred_isin[:2000], task.eval_k)
+val_ranking_plots.fig_scatter.savefig(f"output/{args.dataset}_{args.task}/figures/2000_ranking_{epoch}.png")
+val_ranking_plots.fig_zoomed.savefig(f"output/{args.dataset}_{args.task}/figures/2000_ranking_zoomed_{epoch}.png")
+plt.close(val_ranking_plots.fig_scatter)
+plt.close(val_ranking_plots.fig_zoomed)
+print("Generated val ranking plot")
+
+# logits distribution - first 5000
+val_logit_distribution_plots = plot_logit_distribution(val_pred_scores_sorted[:5000][val_pred_isin[:5000]], val_pred_scores_sorted[:5000][~val_pred_isin[:5000]])
+val_logit_distribution_plots.savefig(f"output/{args.dataset}_{args.task}/figures/5000_logit_distribution_{epoch}.png")
+plt.close(val_logit_distribution_plots)
+print("Generated val logit distribution plot")
+
+
+# === our training loop ===
+# who art in the cloud
 state_dict = None
 best_val_metric = 0
 tune_metric = "auc"
