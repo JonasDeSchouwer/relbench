@@ -1,0 +1,30 @@
+Loading Database object from /lfs/ampere2/0/jonasds/scratch/relbench/rel-amazon/db...
+Done in 46.52 seconds.
+Traceback (most recent call last):
+  File "/lfs/ampere2/0/jonasds/relbench/examples/gnn_recommendation.py", line 83, in <module>
+    data, col_stats_dict = make_pkey_fkey_graph(
+  File "/lfs/ampere2/0/jonasds/relbench/relbench/modeling/graph.py", line 71, in make_pkey_fkey_graph
+    dataset = Dataset(
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch_frame/data/dataset.py", line 588, in materialize
+    self._tensor_frame, self._col_stats = torch_frame.load(
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch_frame/utils/io.py", line 104, in load
+    tf_dict, col_stats = torch.load(path, weights_only=True)
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/serialization.py", line 1516, in load
+    return _load(
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/serialization.py", line 2114, in _load
+    result = unpickler.load()
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/_weights_only_unpickler.py", line 532, in load
+    self.append(self.persistent_load(pid))
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/serialization.py", line 2078, in persistent_load
+    typed_storage = load_tensor(
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/serialization.py", line 2044, in load_tensor
+    wrap_storage = restore_location(storage, location)
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/serialization.py", line 698, in default_restore_location
+    result = fn(storage, location)
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/serialization.py", line 637, in _deserialize
+    return obj.to(device=device)
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/storage.py", line 287, in to
+    return _to(self, device, non_blocking)
+  File "/lfs/ampere2/0/jonasds/relbench/.pixi/envs/default/lib/python3.10/site-packages/torch/_utils.py", line 101, in _to
+    untyped_storage = torch.UntypedStorage(self.size(), device=device)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 28.26 GiB. GPU 0 has a total capacity of 79.14 GiB of which 9.16 GiB is free. Process 3115571 has 64.08 GiB memory in use. Process 3423869 has 2.96 GiB memory in use. Including non-PyTorch memory, this process has 2.92 GiB memory in use. Of the allocated memory 2.52 GiB is allocated by PyTorch, and 0 bytes is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
