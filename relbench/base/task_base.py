@@ -11,6 +11,8 @@ from .database import Database
 from .dataset import Dataset
 from .table import Table
 
+import logging
+
 
 class TaskType(Enum):
     r"""The type of the task.
@@ -117,6 +119,7 @@ class BaseTask:
                     "insufficient aggregation time."
                 )
 
+            logging.info("--- val split ---")
             start = self.dataset.val_timestamp
             end = min(
                 self.dataset.val_timestamp
@@ -124,6 +127,13 @@ class BaseTask:
                 self.dataset.test_timestamp - self.timedelta,
             )
             freq = self.timedelta
+
+            logging.info(f"start: {start}")
+            logging.info(f"end: {end}")
+            logging.info(f"self.dataset.val_timestamp + self.timedelta * (self.num_eval_timestamps - 1) = {self.dataset.val_timestamp + self.timedelta * (self.num_eval_timestamps - 1)}")
+            logging.info(f"db.max_timestamp = {db.max_timestamp}")
+            logging.info(f"self.dataset.test_timestamp - self.timedelta = {self.dataset.test_timestamp - self.timedelta}")
+            logging.info(f"self.timedelta = {self.timedelta}")
 
         elif split == "test":
             if self.dataset.test_timestamp + self.timedelta > db.max_timestamp:
@@ -133,6 +143,8 @@ class BaseTask:
                     "insufficient aggregation time."
                 )
 
+            logging.info("--- test split ---")
+
             start = self.dataset.test_timestamp
             end = min(
                 self.dataset.test_timestamp
@@ -141,7 +153,15 @@ class BaseTask:
             )
             freq = self.timedelta
 
+            logging.info(f"start: {start}")
+            logging.info(f"end: {end}")
+            logging.info(f"self.dataset.test_timestamp + self.timedelta * (self.num_eval_timestamps - 1) = {self.dataset.test_timestamp + self.timedelta * (self.num_eval_timestamps - 1)}")
+            logging.info(f"db.max_timestamp = {db.max_timestamp}")
+            logging.info(f"db.max_timestamp - self.timedelta = {db.max_timestamp - self.timedelta}")
+            logging.info(f"self.timedelta = {self.timedelta}")
+
         timestamps = pd.date_range(start=start, end=end, freq=freq)
+        logging.info(f"timestamps: {timestamps}")
 
         if split == "train" and len(timestamps) < 3:
             raise RuntimeError(

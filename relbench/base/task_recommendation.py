@@ -10,6 +10,8 @@ from .dataset import Dataset
 from .table import Table
 from .task_base import BaseTask, TaskType
 
+import logging
+
 
 class RecommendationTask(BaseTask):
     r"""A link prediction task on a dataset.
@@ -49,9 +51,14 @@ class RecommendationTask(BaseTask):
 
     def filter_dangling_entities(self, table: Table) -> Table:
         # filter dangling destination entities from a list
+        logging.info(f"filtering dangling destination entities from a list for {self.dst_entity_col}")
+        num_dst_nodes_before = table.df[self.dst_entity_col].map(len).sum()
+        logging.info(f"num dst nodes before filtering: {num_dst_nodes_before}")
         table.df[self.dst_entity_col] = table.df[self.dst_entity_col].apply(
             lambda x: [i for i in x if i < self.num_dst_nodes]
         )
+        num_dst_nodes_after = table.df[self.dst_entity_col].map(len).sum()
+        logging.info(f"num dst nodes after filtering: {num_dst_nodes_after}")
 
         # filter dangling source entities and empty list (after above filtering)
         filter_mask = (table.df[self.src_entity_col] >= self.num_src_nodes) | (
@@ -101,10 +108,12 @@ class RecommendationTask(BaseTask):
     @property
     def num_src_nodes(self) -> int:
         return len(self.dataset.get_db().table_dict[self.src_entity_table])
+        # return len(self.dataset.get_db(upto_test_timestamp=False).table_dict[self.src_entity_table])
 
     @property
     def num_dst_nodes(self) -> int:
         return len(self.dataset.get_db().table_dict[self.dst_entity_table])
+        # return len(self.dataset.get_db(upto_test_timestamp=False).table_dict[self.dst_entity_table])
 
     def stats(self) -> Dict[str, Dict[str, int]]:
         r"""Get train / val / test table statistics for each timestamp and the whole
